@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -28,6 +29,8 @@ class PDFView extends StatefulWidget {
     this.autoSpacing = true,
     this.pageFling = true,
     this.pageSnap = true,
+    this.iosBackgroundColor = Colors.white70,
+    this.iosPageShadowsEnabled = true,
   }) : super(key: key);
 
   @override
@@ -61,6 +64,8 @@ class PDFView extends StatefulWidget {
   final bool autoSpacing;
   final bool pageFling;
   final bool pageSnap;
+  final Color iosBackgroundColor;
+  final bool iosPageShadowsEnabled;
 }
 
 class _PDFViewState extends State<PDFView> {
@@ -142,6 +147,8 @@ class _PDFViewSettings {
     this.autoSpacing,
     this.pageFling,
     this.pageSnap,
+    this.iosBackgroundColor,
+    this.iosPageShadowsEnabled,
   });
 
   static _PDFViewSettings fromWidget(PDFView widget) {
@@ -153,6 +160,8 @@ class _PDFViewSettings {
       autoSpacing: widget.autoSpacing,
       pageFling: widget.pageFling,
       pageSnap: widget.pageSnap,
+      iosBackgroundColor: widget.iosBackgroundColor,
+      iosPageShadowsEnabled: widget.iosPageShadowsEnabled,
     );
   }
 
@@ -163,6 +172,8 @@ class _PDFViewSettings {
   final bool autoSpacing;
   final bool pageFling;
   final bool pageSnap;
+  final Color iosBackgroundColor;
+  final bool iosPageShadowsEnabled;
 
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
@@ -173,6 +184,8 @@ class _PDFViewSettings {
       'autoSpacing': autoSpacing,
       'pageFling': pageFling,
       'pageSnap': pageSnap,
+      'iosBackgroundColor': '#${iosBackgroundColor.value.toRadixString(16).padLeft(8, '0')}',
+      'iosPageShadowsEnabled': iosPageShadowsEnabled,
     };
   }
 

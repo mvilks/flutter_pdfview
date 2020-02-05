@@ -39,6 +39,17 @@
     NSNumber* _currentPage;
 }
 
+- (UIColor *)colorFromHexString:(NSString *)hexString {
+    unsigned argbValue = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:hexString];
+    [scanner setScanLocation:1]; // bypass '#' character
+    [scanner scanHexInt:&argbValue];
+    return [UIColor colorWithRed:((argbValue & 0xFF0000) >> 16)/255.0
+                            green:((argbValue & 0xFF00) >> 8)/255.0
+                            blue:(argbValue & 0xFF)/255.0
+                            alpha:((argbValue & 0xFF000000) >> 24)/255.0];
+}
+
 - (instancetype)initWithFrame:(CGRect)frame
                viewIdentifier:(int64_t)viewId
                     arguments:(id _Nullable)args
@@ -70,7 +81,14 @@
                 _pdfView.autoresizesSubviews = YES;
                 _pdfView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
-                _pdfView.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
+                NSString* bgColor = args[@"iosBackgroundColor"];
+                _pdfView.backgroundColor = [self colorFromHexString:bgColor];
+
+                if (@available(iOS 12, *)) {
+                    BOOL pageShadows = [args[@"iosPageShadowsEnabled"] boolValue];
+                    _pdfView.pageShadowsEnabled = pageShadows;
+                }
+
                 BOOL swipeHorizontal = [args[@"swipeHorizontal"] boolValue];
                 if (swipeHorizontal) {
                     _pdfView.displayDirection = kPDFDisplayDirectionHorizontal;
