@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -6,21 +7,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-typedef void PDFViewCreatedCallback(PDFViewController controller);
-typedef void RenderCallback(int pages);
-typedef void PageChangedCallback(int page, int total);
-typedef void ErrorCallback(dynamic error);
-typedef void PageErrorCallback(int page, dynamic error);
+typedef PDFViewCreatedCallback = void Function(PDFViewController controller);
+typedef RenderCallback = void Function(int pages);
+typedef PageChangedCallback = void Function(int page, int total);
+typedef ErrorCallback = void Function(dynamic error);
+typedef PageErrorCallback = void Function(int page, dynamic error);
+typedef LinkHandlerCallback = void Function(String uri);
+
+enum FitPolicy { WIDTH, HEIGHT, BOTH }
 
 class PDFView extends StatefulWidget {
   const PDFView({
     Key key,
-    @required this.filePath,
+    this.filePath,
+    this.pdfData,
     this.onViewCreated,
     this.onRender,
     this.onPageChanged,
     this.onError,
     this.onPageError,
+    this.onLinkHandler,
     this.gestureRecognizers,
     this.enableSwipe = true,
     this.swipeHorizontal = false,
@@ -31,7 +37,12 @@ class PDFView extends StatefulWidget {
     this.pageSnap = true,
     this.iosBackgroundColor = Colors.white70,
     this.iosPageShadowsEnabled = true,
-  }) : super(key: key);
+    this.fitEachPage = true,
+    this.defaultPage = 0,
+    this.fitPolicy = FitPolicy.WIDTH,
+    this.preventLinkNavigation = false,
+  })  : assert(filePath != null || pdfData != null),
+        super(key: key);
 
   @override
   _PDFViewState createState() => _PDFViewState();
@@ -42,6 +53,7 @@ class PDFView extends StatefulWidget {
   final PageChangedCallback onPageChanged;
   final ErrorCallback onError;
   final PageErrorCallback onPageError;
+  final LinkHandlerCallback onLinkHandler;
 
   /// Which gestures should be consumed by the pdf view.
   ///
@@ -56,6 +68,7 @@ class PDFView extends StatefulWidget {
 
   /// The initial URL to load.
   final String filePath;
+  final Uint8List pdfData;
 
   final bool enableSwipe;
   final bool swipeHorizontal;
@@ -66,6 +79,10 @@ class PDFView extends StatefulWidget {
   final bool pageSnap;
   final Color iosBackgroundColor;
   final bool iosPageShadowsEnabled;
+  final int defaultPage;
+  final FitPolicy fitPolicy;
+  final bool fitEachPage;
+  final bool preventLinkNavigation;
 }
 
 class _PDFViewState extends State<PDFView> {
@@ -91,7 +108,7 @@ class _PDFViewState extends State<PDFView> {
       );
     }
     return Text(
-        '$defaultTargetPlatform is not yet supported by the webview_flutter plugin');
+        '$defaultTargetPlatform is not yet supported by the pdfview_flutter plugin');
   }
 
   void _onPlatformViewCreated(int id) {
@@ -113,23 +130,27 @@ class _PDFViewState extends State<PDFView> {
 class _CreationParams {
   _CreationParams({
     this.filePath,
+    this.pdfData,
     this.settings,
   });
 
   static _CreationParams fromWidget(PDFView widget) {
     return _CreationParams(
       filePath: widget.filePath,
+      pdfData: widget.pdfData,
       settings: _PDFViewSettings.fromWidget(widget),
     );
   }
 
   final String filePath;
+  final Uint8List pdfData;
 
   final _PDFViewSettings settings;
 
   Map<String, dynamic> toMap() {
     Map<String, dynamic> params = {
       'filePath': filePath,
+      'pdfData': pdfData,
     };
 
     params.addAll(settings.toMap());
@@ -139,30 +160,35 @@ class _CreationParams {
 }
 
 class _PDFViewSettings {
-  _PDFViewSettings({
-    this.enableSwipe,
-    this.swipeHorizontal,
-    this.password,
-    this.nightMode,
-    this.autoSpacing,
-    this.pageFling,
-    this.pageSnap,
-    this.iosBackgroundColor,
-    this.iosPageShadowsEnabled,
-  });
+  _PDFViewSettings(
+      {this.enableSwipe,
+      this.swipeHorizontal,
+      this.password,
+      this.nightMode,
+      this.autoSpacing,
+      this.pageFling,
+      this.pageSnap,
+      this.iosBackgroundColor,
+      this.iosPageShadowsEnabled,
+      this.defaultPage,
+      this.fitPolicy,
+      this.fitEachPage,
+      this.preventLinkNavigation});
 
   static _PDFViewSettings fromWidget(PDFView widget) {
     return _PDFViewSettings(
-      enableSwipe: widget.enableSwipe,
-      swipeHorizontal: widget.swipeHorizontal,
-      password: widget.password,
-      nightMode: widget.nightMode,
-      autoSpacing: widget.autoSpacing,
-      pageFling: widget.pageFling,
-      pageSnap: widget.pageSnap,
-      iosBackgroundColor: widget.iosBackgroundColor,
-      iosPageShadowsEnabled: widget.iosPageShadowsEnabled,
-    );
+        enableSwipe: widget.enableSwipe,
+        swipeHorizontal: widget.swipeHorizontal,
+        password: widget.password,
+        nightMode: widget.nightMode,
+        autoSpacing: widget.autoSpacing,
+        pageFling: widget.pageFling,
+        pageSnap: widget.pageSnap,
+        iosBackgroundColor: widget.iosBackgroundColor,
+        iosPageShadowsEnabled: widget.iosPageShadowsEnabled,
+        defaultPage: widget.defaultPage,
+        fitPolicy: widget.fitPolicy,
+        preventLinkNavigation: widget.preventLinkNavigation);
   }
 
   final bool enableSwipe;
@@ -174,6 +200,10 @@ class _PDFViewSettings {
   final bool pageSnap;
   final Color iosBackgroundColor;
   final bool iosPageShadowsEnabled;
+  final int defaultPage;
+  final FitPolicy fitPolicy;
+  final bool fitEachPage;
+  final bool preventLinkNavigation;
 
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
@@ -184,8 +214,13 @@ class _PDFViewSettings {
       'autoSpacing': autoSpacing,
       'pageFling': pageFling,
       'pageSnap': pageSnap,
-      'iosBackgroundColor': '#${iosBackgroundColor.value.toRadixString(16).padLeft(8, '0')}',
+      'iosBackgroundColor':
+          '#${iosBackgroundColor.value.toRadixString(16).padLeft(8, '0')}',
       'iosPageShadowsEnabled': iosPageShadowsEnabled,
+      'defaultPage': defaultPage,
+      'fitPolicy': fitPolicy.toString(),
+      'fitEachPage': fitEachPage,
+      'preventLinkNavigation': preventLinkNavigation
     };
   }
 
@@ -200,7 +235,9 @@ class _PDFViewSettings {
     if (pageSnap != newSettings.pageSnap) {
       updates['pageSnap'] = newSettings.pageSnap;
     }
-
+    if (preventLinkNavigation != newSettings.preventLinkNavigation) {
+      updates['preventLinkNavigation'] = newSettings.preventLinkNavigation;
+    }
     return updates;
   }
 }
@@ -221,7 +258,6 @@ class PDFViewController {
   PDFView _widget;
 
   Future<bool> _onMethodCall(MethodCall call) async {
-    print([call.method, call.arguments]);
     switch (call.method) {
       case 'onRender':
         if (_widget.onRender != null) {
@@ -245,6 +281,12 @@ class PDFViewController {
       case 'onPageError':
         if (_widget.onPageError != null) {
           _widget.onPageError(call.arguments['page'], call.arguments['error']);
+        }
+
+        return null;
+      case 'onLinkHandler':
+        if (_widget.onLinkHandler != null) {
+          _widget.onLinkHandler(call.arguments);
         }
 
         return null;

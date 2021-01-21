@@ -16,6 +16,8 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String pathPDF = "";
+  String landscapePathPdf = "";
+  String remotePDFpath = "";
   String corruptedPathPDF = "";
 
   @override
@@ -26,31 +28,47 @@ class _MyAppState extends State<MyApp> {
         corruptedPathPDF = f.path;
       });
     });
-    fromAsset('assets/demo.pdf', 'demo.pdf').then((f) {
+    fromAsset('assets/demo-link.pdf', 'demo.pdf').then((f) {
       setState(() {
         pathPDF = f.path;
       });
     });
-    // createFileOfPdfUrl().then((f) {
-    //   setState(() {
-    //     pathPDF = f.path;
-    //     print(pathPDF);
-    //   });
-    // });
+    fromAsset('assets/demo-landscape.pdf', 'landscape.pdf').then((f) {
+      setState(() {
+        landscapePathPdf = f.path;
+      });
+    });
+
+    createFileOfPdfUrl().then((f) {
+      setState(() {
+        remotePDFpath = f.path;
+      });
+    });
   }
 
   Future<File> createFileOfPdfUrl() async {
-    // final url =
-    // "https://berlin2017.droidcon.cod.newthinking.net/sites/global.droidcon.cod.newthinking.net/files/media/documents/Flutter%20-%2060FPS%20UI%20of%20the%20future%20%20-%20DroidconDE%2017.pdf";
-    final url = "https://pdfkit.org/docs/guide.pdf";
-    final filename = url.substring(url.lastIndexOf("/") + 1);
-    var request = await HttpClient().getUrl(Uri.parse(url));
-    var response = await request.close();
-    var bytes = await consolidateHttpClientResponseBytes(response);
-    String dir = (await getApplicationDocumentsDirectory()).path;
-    File file = new File('$dir/$filename');
-    await file.writeAsBytes(bytes);
-    return file;
+    Completer<File> completer = Completer();
+    print("Start download file from internet!");
+    try {
+      // "https://berlin2017.droidcon.cod.newthinking.net/sites/global.droidcon.cod.newthinking.net/files/media/documents/Flutter%20-%2060FPS%20UI%20of%20the%20future%20%20-%20DroidconDE%2017.pdf";
+      // final url = "https://pdfkit.org/docs/guide.pdf";
+      final url = "http://www.pdf995.com/samples/pdf.pdf";
+      final filename = url.substring(url.lastIndexOf("/") + 1);
+      var request = await HttpClient().getUrl(Uri.parse(url));
+      var response = await request.close();
+      var bytes = await consolidateHttpClientResponseBytes(response);
+      var dir = await getApplicationDocumentsDirectory();
+      print("Download files");
+      print("${dir.path}/$filename");
+      File file = File("${dir.path}/$filename");
+
+      await file.writeAsBytes(bytes, flush: true);
+      completer.complete(file);
+    } catch (e) {
+      throw Exception('Error parsing asset file!');
+    }
+
+    return completer.future;
   }
 
   Future<File> fromAsset(String asset, String filename) async {
@@ -83,28 +101,58 @@ class _MyAppState extends State<MyApp> {
             return Column(
               children: <Widget>[
                 RaisedButton(
-                    child: Text("Open PDF"),
-                    onPressed: () {
-                      if (pathPDF != null) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => PDFScreen(path: pathPDF)),
-                        );
-                      }
-                    }),
+                  child: Text("Open PDF"),
+                  onPressed: () {
+                    if (pathPDF != null || pathPDF.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PDFScreen(path: pathPDF),
+                        ),
+                      );
+                    }
+                  },
+                ),
                 RaisedButton(
-                    child: Text("Open Corrupted PDF"),
-                    onPressed: () {
-                      if (pathPDF != null) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  PDFScreen(path: corruptedPathPDF)),
-                        );
-                      }
-                    })
+                  child: Text("Open Landscape PDF"),
+                  onPressed: () {
+                    if (landscapePathPdf != null || landscapePathPdf.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PDFScreen(path: landscapePathPdf),
+                        ),
+                      );
+                    }
+                  },
+                ),
+                RaisedButton(
+                  child: Text("Remote PDF"),
+                  onPressed: () {
+                    if (remotePDFpath != null || remotePDFpath.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PDFScreen(path: remotePDFpath),
+                        ),
+                      );
+                    }
+                  },
+                ),
+                RaisedButton(
+                  child: Text("Open Corrupted PDF"),
+                  onPressed: () {
+                    if (pathPDF != null) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              PDFScreen(path: corruptedPathPDF),
+                        ),
+                      );
+                    }
+                  },
+                )
               ],
             );
           },
@@ -122,10 +170,11 @@ class PDFScreen extends StatefulWidget {
   _PDFScreenState createState() => _PDFScreenState();
 }
 
-class _PDFScreenState extends State<PDFScreen> {
+class _PDFScreenState extends State<PDFScreen> with WidgetsBindingObserver {
   final Completer<PDFViewController> _controller =
       Completer<PDFViewController>();
   int pages = 0;
+  int currentPage = 0;
   bool isReady = false;
   String errorMessage = '';
 
@@ -147,8 +196,13 @@ class _PDFScreenState extends State<PDFScreen> {
             filePath: widget.path,
             enableSwipe: true,
             swipeHorizontal: true,
-            autoSpacing: true,
+            autoSpacing: false,
             pageFling: true,
+            pageSnap: true,
+            defaultPage: currentPage,
+            fitPolicy: FitPolicy.BOTH,
+            preventLinkNavigation:
+                false, // if set to true the link is handled in flutter
             onRender: (_pages) {
               setState(() {
                 pages = _pages;
@@ -170,8 +224,14 @@ class _PDFScreenState extends State<PDFScreen> {
             onViewCreated: (PDFViewController pdfViewController) {
               _controller.complete(pdfViewController);
             },
+            onLinkHandler: (String uri) {
+              print('goto uri: $uri');
+            },
             onPageChanged: (int page, int total) {
               print('page change: $page/$total');
+              setState(() {
+                currentPage = page;
+              });
             },
           ),
           errorMessage.isEmpty
@@ -180,7 +240,9 @@ class _PDFScreenState extends State<PDFScreen> {
                       child: CircularProgressIndicator(),
                     )
                   : Container()
-              : Center(child: Text(errorMessage))
+              : Center(
+                  child: Text(errorMessage),
+                )
         ],
       ),
       floatingActionButton: FutureBuilder<PDFViewController>(

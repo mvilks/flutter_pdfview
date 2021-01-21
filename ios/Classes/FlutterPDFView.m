@@ -37,6 +37,7 @@
     FlutterMethodChannel* _channel;
     NSNumber* _pageCount;
     NSNumber* _currentPage;
+    BOOL _preventLinkNavigation;
 }
 
 - (UIColor *)colorFromHexString:(NSString *)hexString {
@@ -60,9 +61,11 @@
         NSString* channelName = [NSString stringWithFormat:@"plugins.endigo.io/pdfview_%lld", viewId];
         _channel = [FlutterMethodChannel methodChannelWithName:channelName binaryMessenger:messenger];
         
-        _pdfView = [[PDFView alloc] initWithFrame:frame];
-        
+        _pdfView = [[PDFView alloc] initWithFrame: [[UIScreen mainScreen] bounds]];
         __weak __typeof__(self) weakSelf = self;
+        _pdfView.delegate = self;
+        
+        
         [_channel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
             [weakSelf onMethodCall:call result:result];
         }];
@@ -70,73 +73,83 @@
         BOOL autoSpacing = [args[@"autoSpacing"] boolValue];
         BOOL pageFling = [args[@"pageFling"] boolValue];
         BOOL enableSwipe = [args[@"enableSwipe"] boolValue];
+        _preventLinkNavigation = [args[@"preventLinkNavigation"] boolValue];
+        
+        NSInteger defaultPage = [args[@"defaultPage"] integerValue];
+
         NSString* filePath = args[@"filePath"];
+        FlutterStandardTypedData* pdfData = args[@"pdfData"];
+
+        PDFDocument* document;
         if ([filePath isKindOfClass:[NSString class]]) {
-            NSURL * sourcePDFUrl = [NSURL fileURLWithPath:filePath];
-            PDFDocument * document = [[PDFDocument alloc] initWithURL: sourcePDFUrl];
-
-            if (document == nil) {
-                [_channel invokeMethod:@"onError" arguments:@{@"error" : @"cannot create document: File not in PDF format or corrupted."}];
-            } else {
-                _pdfView.autoresizesSubviews = YES;
-                _pdfView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-
-                NSString* bgColor = args[@"iosBackgroundColor"];
-                _pdfView.backgroundColor = [self colorFromHexString:bgColor];
-
-                if (@available(iOS 12, *)) {
-                    BOOL pageShadows = [args[@"iosPageShadowsEnabled"] boolValue];
-                    _pdfView.pageShadowsEnabled = pageShadows;
-                }
-
-                BOOL swipeHorizontal = [args[@"swipeHorizontal"] boolValue];
-                if (swipeHorizontal) {
-                    _pdfView.displayDirection = kPDFDisplayDirectionHorizontal;
-                } else {
-                    _pdfView.displayDirection = kPDFDisplayDirectionVertical;
-                }
-
-                [_pdfView usePageViewController:pageFling withViewOptions:nil];
-                _pdfView.autoScales = autoSpacing;
-                _pdfView.displayMode = enableSwipe ? kPDFDisplaySinglePageContinuous : kPDFDisplaySinglePage;
-                _pdfView.document = document;
-
-                PDFPage* page = [document pageAtIndex:0];
-
-                CGRect pageRect = [page boundsForBox:[_pdfView displayBox]];
-
-                CGRect parentRect = [[UIScreen mainScreen] bounds];
-
-                if (frame.size.width > 0 && frame.size.height > 0) {
-                    parentRect = frame;
-                }
-
-                CGFloat scale = 1.0f;
-                if (parentRect.size.width / parentRect.size.height >= pageRect.size.width / pageRect.size.height) {
-                    scale = parentRect.size.height / pageRect.size.height;
-                } else {
-                    scale = parentRect.size.width / pageRect.size.width;
-                }
-
-                NSLog(@"scale %f", scale);
-
-                _pdfView.scaleFactor = scale;
-
-                _pdfView.minScaleFactor = _pdfView.scaleFactorForSizeToFit;
-                _pdfView.maxScaleFactor = 4.0;
-
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [weakSelf handleRenderCompleted:[NSNumber numberWithUnsignedLong: [document pageCount]]];
-                });
-
-                NSString* password = args[@"password"];
-                if ([password isKindOfClass:[NSString class]] && [_pdfView.document isEncrypted]) {
-                    [_pdfView.document unlockWithPassword:password];
-                }
-            }
+            NSURL* sourcePDFUrl = [NSURL fileURLWithPath:filePath];
+            document = [[PDFDocument alloc] initWithURL: sourcePDFUrl];
+        } else if ([pdfData isKindOfClass:[FlutterStandardTypedData class]]) {
+            NSData* sourcePDFdata = [pdfData data];
+            document = [[PDFDocument alloc] initWithData: sourcePDFdata];
         }
 
+        if (document == nil) {
+            [_channel invokeMethod:@"onError" arguments:@{@"error" : @"cannot create document: File not in PDF format or corrupted."}];
+        } else {
+            _pdfView.autoresizesSubviews = YES;
+            _pdfView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
+            NSString* bgColor = args[@"iosBackgroundColor"];
+            _pdfView.backgroundColor = [self colorFromHexString:bgColor];
+
+            if (@available(iOS 12, *)) {
+                BOOL pageShadows = [args[@"iosPageShadowsEnabled"] boolValue];
+                _pdfView.pageShadowsEnabled = pageShadows;
+            }
+
+            BOOL swipeHorizontal = [args[@"swipeHorizontal"] boolValue];
+            if (swipeHorizontal) {
+                _pdfView.displayDirection = kPDFDisplayDirectionHorizontal;
+            } else {
+                _pdfView.displayDirection = kPDFDisplayDirectionVertical;
+            }
+
+            [_pdfView usePageViewController:pageFling withViewOptions:nil];
+            _pdfView.displayMode = enableSwipe ? kPDFDisplaySinglePageContinuous : kPDFDisplaySinglePage;
+            _pdfView.document = document;
+            _pdfView.autoScales = autoSpacing;
+            NSString* password = args[@"password"];
+            if ([password isKindOfClass:[NSString class]] && [_pdfView.document isEncrypted]) {
+                [_pdfView.document unlockWithPassword:password];
+            }
+
+            NSUInteger pageCount = [document pageCount];
+
+            if (pageCount <= defaultPage) {
+                defaultPage = pageCount - 1;
+            }
+
+        PDFPage* page = [document pageAtIndex: defaultPage];
+        [_pdfView goToPage: page];
+
+            _pdfView.minScaleFactor = _pdfView.scaleFactorForSizeToFit;
+            _pdfView.maxScaleFactor = 4.0;
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf handleRenderCompleted:[NSNumber numberWithUnsignedLong: [document pageCount]]];
+            });
+        }
+        
+        if (@available(iOS 11.0, *)) {
+            UIScrollView *_scrollView;
+
+            for (id subview in _pdfView.subviews) {
+                if ([subview isKindOfClass: [UIScrollView class]]) {
+                    _scrollView = subview;
+                }
+            }
+            
+            _scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+            if (@available(iOS 13.0, *)) {
+                _scrollView.automaticallyAdjustsScrollIndicatorInsets = NO;
+            }
+        }
         
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handlePageChanged:) name:PDFViewPageChangedNotification object:_pdfView];
         
@@ -178,7 +191,7 @@
     NSNumber* page = arguments[@"page"];
     
     [_pdfView goToPage: [_pdfView.document pageAtIndex: page.unsignedLongValue ]];
-    result(_currentPage);
+    result([NSNumber numberWithBool: YES]);
 }
 
 - (void)onUpdateSettings:(FlutterMethodCall*)call result:(FlutterResult)result {
@@ -193,5 +206,12 @@
     [_channel invokeMethod:@"onRender" arguments:@{@"pages" : pages}];
 }
 
+- (void)PDFViewWillClickOnLink:(PDFView *)sender
+                       withURL:(NSURL *)url{
+    if (!_preventLinkNavigation){
+        [[UIApplication sharedApplication] openURL:url];
+    }
+    [_channel invokeMethod:@"onLinkHandler" arguments:url.absoluteString];
+}
 
 @end
